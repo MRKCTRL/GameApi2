@@ -25,6 +25,7 @@ app=Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URI', 'postgresql://username:password@localhost/game_api')
 app.config['JWT_SECRET_KEY'] = 'super-secret'
 db=SQLAlchemy(app)
+cache=Cache(app, config={'CACHE_TYPE': 'SimpleCache'})
 jwt=JWTManager(app)
 
 cache=Cache(app,config={'CACHE_TYPE': 'SimpleCache'})

@@ -17,6 +17,13 @@ from flask_limiter.util import get_remote_address
 from celery import Celery 
 from celery.schedules import cronotab
 
+import psycopg2 
+import pandas as pd 
+
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 
 from flask_marshmallow import Marshmallow
 
@@ -27,6 +34,20 @@ app.config['JWT_SECRET_KEY'] = 'super-secret'
 db=SQLAlchemy(app)
 cache=Cache(app, config={'CACHE_TYPE': 'SimpleCache'})
 jwt=JWTManager(app)
+
+
+conn=psycopg2.connect("dbname=game_api user+username password=password")
+query= "SELECT id, title, genre, tags FROM games"
+games_df =pd.read_sql(query, conn)
+conn.close()
+
+
+games_df['features'] = games_df['genre'] + ' ' + games_df['tags'].apply(lambda x: ' '.join(x))
+vectorizer=TfidfVectorizer()
+tfidf_matrix= vectorizer.fit_transform(games_df['features'])
+
+
+similarity_matrix=cosine_similarity(tfidf_matrix, tfidf_matrix)
 
 cache=Cache(app,config={'CACHE_TYPE': 'SimpleCache'})
 limiter=Limiter(app, key_func=get_remote_address)
@@ -63,6 +84,27 @@ class User(db.model):
 RAPIDAPI_KEY= os.getenv('')
 RAPIDAPI_HOST=os.getenv('')
 
+def recommend_games(game_id, top_n=5):
+    game_index=games_df[games_df['id'] == game_id].index[0]
+    
+    
+    similarity_scores=list(enumerate(similarity_matrix[game_index]))
+    
+    similarity_scores=sorted(similarity_scores, key=lambda x: x[1], reverse=True)
+    
+    top_games=similarity_scores[1:top_n + 1]
+    
+    recommended_games=[]
+    for index, score in top_games:
+        recommended_games.append({
+            'id': games_df.iloc[index]['id'],
+            'title': games_df.iloc[index]['title'],
+            'score': score
+        })
+    return recommended_games
+    
+
+
 def fetch_rapidapi_data(endpoint, params=None):
     headers= {
         'X-RapidAPI-Key': RAPIDAPI_KEY,
@@ -84,6 +126,22 @@ def register():
     return jsonify({'message': 'User register successfully'})
     if errors:
         return jsonify(errors), 400
+
+
+@app.route('/api/like-game', methods=['POST'])
+@jwt_required()
+def like_game():
+    user_id=get_jwt_identity()
+    game_id=request.json.get('game_id')
+    conn = get_db_connection()
+    conn.execute('INSERT INTO user_preferences (user_id, game_id) VALUES (%s, %s)', (user_id, game_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Game liked successfully!'})
+
+
+
+
 
 
 @app.route('api/login', methods=["POST"])

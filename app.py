@@ -139,6 +139,26 @@ def like_game():
     conn.close()
     return jsonify({'message': 'Game liked successfully!'})
 
+@app.route('/api/recommendations', methods=['GET'])
+@jwt_required()
+def get_recommendations():
+    user_id=get_jwt_identity()
+    liked_games=get_liked_games(user_id)
+    
+    recommendations = []
+    for game_id in liked_games:
+        for game_id in liked_games:
+            recommendations.extend(recommend_games(game_id))
+        
+    
+    recommendations=sorted(recommendations, key=lambda x: x['score'], reverse=True)
+    unique_recommendations=[]
+    seen=set()
+    for rec in recommendations:
+        if rec['id'] not in seen:
+            unique_recommendations.append(rec)
+            seen.add(rec['id'])
+    return jsonify(unique_recommendations[:10])
 
 
 

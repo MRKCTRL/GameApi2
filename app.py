@@ -11,11 +11,15 @@ from flask_caching import Cache
 
 
 from flask_limiter import Limiter 
+
+from flask_jwt_extended import creat_refresh_token, jwt_refresh_token_required
 from flask_limiter.util import get_remote_address
 from flask import g
 
 from celery import Celery 
 from celery.schedules import cronotab
+
+from flask_socketio import SocketIO, emit
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -28,17 +32,31 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 
 from flask_marshmallow import Marshmallow
+from marshmallow import Schema, fields
+
+from werkzeug.secruity import generate_password_hash, check_password_hash
 
 import os 
-import dotenv import loadenv
+from dotenv import loadenv
 
-ma=Marshmallow(app)
+from flask_migrate import Migrate
+
+
+load_dotenv()
+
+
+
 app=Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URI', 'postgresql://username:password@localhost/game_api')
+app.config['SQLALCHEMY_POOL_SIZE'] = 20
 app.config['JWT_SECRET_KEY'] = 'super-secret'
 db=SQLAlchemy(app)
 cache=Cache(app, config={'CACHE_TYPE': 'SimpleCache'})
 jwt=JWTManager(app)
+
+ma=Marshmallow(app)
+migrate=Migrate(app, db)
+socketio=SocketIO(app)
 
 
 conn=psycopg2.connect("dbname=game_api user+username password=password")
@@ -46,6 +64,10 @@ query= "SELECT id, title, genre, tags FROM games"
 games_df =pd.read_sql(query, conn)
 conn.close()
 
+
+
+hashed_pw=generate_password_hash('user_password')
+check_password_hash(hashed_pw, 'input_password') 
 
 games_df['features'] = games_df['genre'] + ' ' + games_df['tags'].apply(lambda x: ' '.join(x))
 vectorizer=TfidfVectorizer()
@@ -84,6 +106,16 @@ class User(db.model):
     id=db.Column(db.Integer, primary_key=True)
     username=db.column(db.String(80), unique=True, nullable=False)
     password=db.Column(db.String(120), nullable=False)
+    
+
+class GameSchema(Schema):
+    title= fields.Str(required=True)
+    genre=fields.Str(required=True)
+
+schema = GameSchema()
+errors = schema.validate(request.json)
+if errors:
+    return jsonify(errors), 400
 
 DATABASE_CONFIG ={
     'host': 'localhost',
@@ -96,11 +128,11 @@ DATABASE_CONFIG ={
 def get_db_connection():
     if 'db_conn' not in g:
         g.db_conn = psycopg2.connect(
-            host=DATABASE_CONFIG['host'],
-            database=DATABASE_CONFIG['database'],
-            user=DATABASE_CONFIG['user'],
-            password=DATABASE_CONFIG['password'],
-            port=DATABASE_CONFIG['port'],
+            host=os.getenv['host'],
+            database=os.getenv['database'],
+            user=os.getenv['user'],
+            password=os.getenv['password'],
+            port=os.getenv['port'],
             cursor_factory=RealDictCursor
         )
         return g.db_conn
@@ -170,6 +202,18 @@ def fetch_rapidapi_data(endpoint, params=None):
     response= requests.get(f"https://{RAPIDAPI_HOST}/{endpoint}", headers=headers, params=params)
     return response.json 
 
+@app.route('/admin')
+@jwt_required()
+def admin_dashboard():
+    current_user=get_jwt_identity()
+    if not current_user['is_admin']:
+        return jsonify({"error": "Admin access required"}), 403
+    return jsonify({"message": "Welcome, Admin"})
+
+@socketio.on('new_deal')
+def handle_new_deal(data):
+    emit('deal_alert', data, broadcast=True)
+
 
 @app.route('/api/register', methods=["POST"])
 def register():
@@ -183,7 +227,21 @@ def register():
     return jsonify({'message': 'User register successfully'})
     if errors:
         return jsonify(errors), 400
+    
+    
+@app.route('/api/data')
+@limiter.limit("100 per day")
+def get_data():
+    return jsonify({"data": "protected"})
 
+
+
+@app.route('/api/refresh', methods=['POST'])
+@jwt_refresh_token_required
+def refresh():
+    current_user=get_jwt_identity()
+    new_token=create_access_token(identity=current_user)
+    return jsonify({'access_token': new_token})
 
 @app.route('/api/games')
 def get_games():

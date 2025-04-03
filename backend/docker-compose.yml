@@ -1,0 +1,41 @@
+version: '3.8'
+
+
+services:
+  backend:
+  build: ./backend
+  ports:
+    - "5000:5000"
+  environment: 
+    - DATABASE_URL=postgresql://postgresql:postgresql:5432/game_api
+    - JWT_SECRET_KEY= #fill me
+  depends_on:
+    - gb 
+  volumes:
+    - ./backend:/app
+    - flask-logs:/var/log//flask
+  db: 
+    image: postgres:13
+    environment:
+      - POSTGRES_DB=game_api
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=root
+    volumes:
+      - postgres-data:/var/lib/postgresql/data 
+    ports: 
+      - "5432:5432"
+
+    redis:
+      image: redis:6
+      ports:
+        - "6379:6379"
+
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  
+volumes:
+  postgres-data:
+  flask-logs:

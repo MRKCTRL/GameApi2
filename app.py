@@ -41,6 +41,14 @@ from dotenv import loadenv
 
 from flask_migrate import Migrate
 
+from flask_cors import CORS
+
+from flask_talisman import Talisman
+
+import logging 
+from pythonjsonlogger import jsonlogger
+
+from celery import Celery
 
 load_dotenv()
 
@@ -51,13 +59,24 @@ app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URI', 'postgresql://
 app.config['SQLALCHEMY_POOL_SIZE'] = 20
 app.config['JWT_SECRET_KEY'] = 'super-secret'
 db=SQLAlchemy(app)
-cache=Cache(app, config={'CACHE_TYPE': 'SimpleCache'})
+cache=Cache(app, config={'CACHE_TYPE': 'RedisCache', 'CACHE_REDIS_URL':'redis://localhost:6379'})
+
+
+CORS(app, resources={r"/api/*": {"origins": "https;// #fill this"}})
 jwt=JWTManager(app)
+
+logger=logging.getLogger()
+handler= logging.StreamHandler()
+formatter=jsonlogger.JsonFormatter()
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+
 
 ma=Marshmallow(app)
 migrate=Migrate(app, db)
 socketio=SocketIO(app)
 
+Talisman(app)
 
 conn=psycopg2.connect("dbname=game_api user+username password=password")
 query= "SELECT id, title, genre, tags FROM games"
@@ -92,6 +111,11 @@ celery.conf.beat___schedule= {
         'schedule': cronotab(minute=0, hour='*/1'),
     },
 }
+@celery.task
+def process_game_data(data):
+    # write the code for this 
+    pass
+
 
 
 class UserSchema(ma.Schema):
@@ -244,6 +268,7 @@ def refresh():
     return jsonify({'access_token': new_token})
 
 @app.route('/api/games')
+@cache.cached(timeout=300)
 def get_games():
     conn = get_db_connection()
     cursor=conn.cursor()

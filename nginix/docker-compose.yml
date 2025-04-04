@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginix/ssl 
+    depends_on:
+      - backend
+
+    backend:
+      build: ./backend
+      environment:
+        - DATABASE_URL=postgresql://postgres:postgres@db:5432/game_api
+        - CELERY_BROKER_URL=redis://redis:6379/0
+      depends_on:
+        - db 
+        - redis 
+    celery:
+      build: ./backend 
+      command: celery -A app.celery worker --loglevel=info 
+      environment:
+        - CELERY_BROKER_URL=redis://redis:6379/0
+      depends_on:
+        - backend
+        - redis
+
+      db:
+        image: postgres:13
+        environment:
+          - POSTGRES_DB=game_api
+          - POSTGRES_USER=postgres 
+          - POSTGRES_PASSWORD=postgres 
+        volumes:
+          - postgres-data:/var/lib/postgresql/data 
+    redis:
+      image: redis:6
+
+volumes: 
+  postgres-data:
